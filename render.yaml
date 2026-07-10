@@ -16,7 +16,9 @@ services:
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
       - key: ALLOWED_ORIGINS
-        value: '["https://ink-graph.vercel.app","http://localhost:5173"]'
+        value: '["https://ink-graph.vercel.app","https://inkgraph-frontend.vercel.app","http://localhost:5173"]'
+      - key: ALLOWED_ORIGIN_REGEX
+        value: "https://.*\\.vercel\\.app"
       - key: MAX_CONCURRENT_RUNS
         value: "20"
       - key: PYTHON_VERSION
