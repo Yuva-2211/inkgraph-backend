@@ -245,6 +245,11 @@ async def health():
     from version import get_version_info; return get_version_info()
 
 
+@app.get("/")
+async def root():
+    from version import get_version_info; return get_version_info()
+
+
 @app.get("/documents")
 async def list_documents(user_id: str = Depends(get_current_user_id)):
     result = (

@@ -8,4 +8,3 @@ langchain-core==0.3.7
 groq==0.11.0
 fpdf2==2.8.1
 duckduckgo_search==6.2.4
-a2wsgi==1.10.8
