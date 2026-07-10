@@ -9,10 +9,8 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str
     ALLOWED_ORIGINS: list[str] = [
         "http://localhost:5173",
-        "https://ink-graph.vercel.app",
         "https://inkgraph-frontend.vercel.app",
     ]
-    ALLOWED_ORIGIN_REGEX: str | None = r"https://.*\.vercel\.app"
 
     # Scaling-related knobs — see scaling.md
     REDIS_URL: str = "redis://localhost:6379/0"

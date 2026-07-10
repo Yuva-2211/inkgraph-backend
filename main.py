@@ -13,8 +13,8 @@ Endpoints:
 Run (dev):
     uvicorn main:app --reload
 
-Run (prod — see scaling.md):
-    gunicorn -k uvicorn.workers.UvicornWorker -w 4 main:app
+Run (prod):
+    uvicorn main:app --host 0.0.0.0 --port $PORT
 """
 
 import asyncio
@@ -60,7 +60,6 @@ app = FastAPI(title="InkGraph API", version="1.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,
-    allow_origin_regex=settings.ALLOWED_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -242,11 +241,6 @@ def _resume_workflow_sync(document_id: str, decision: str, note: str | None = No
 # ---------------------------------------------------------------------------
 @app.get("/health")
 async def health():
-    from version import get_version_info; return get_version_info()
-
-
-@app.get("/")
-async def root():
     from version import get_version_info; return get_version_info()
 
 
