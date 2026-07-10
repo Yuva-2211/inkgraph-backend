@@ -410,6 +410,244 @@ def clean_pdf_text(text: str) -> str:
     return text.encode("latin-1", errors="replace").decode("latin-1")
 
 
+def _pdf_inline_text(text: str) -> str:
+    """Return safely escaped text for ReportLab paragraphs."""
+    from xml.sax.saxutils import escape
+
+    text = clean_pdf_text(text or "")
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    text = re.sub(r"\*(.+?)\*", r"\1", text)
+    text = re.sub(r"`(.+?)`", r"\1", text)
+    text = re.sub(r"\[(.*?)\]\(.*?\)", r"\1", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return escape(text)
+
+
+def _pdf_content_blocks(content: str):
+    heading = re.compile(r"^(#{1,3})\s+(.+)$")
+    bullet = re.compile(r"^[-*]\s+(.+)$")
+    paragraph_lines: list[str] = []
+
+    def flush_paragraph():
+        nonlocal paragraph_lines
+        if paragraph_lines:
+            yield "paragraph", " ".join(paragraph_lines)
+            paragraph_lines = []
+
+    for raw_line in (content or "").splitlines():
+        line = raw_line.strip()
+
+        if not line:
+            yield from flush_paragraph()
+            continue
+
+        heading_match = heading.match(line)
+        bullet_match = bullet.match(line)
+
+        if heading_match:
+            yield from flush_paragraph()
+            yield f"h{len(heading_match.group(1))}", heading_match.group(2)
+        elif bullet_match:
+            yield from flush_paragraph()
+            yield "bullet", bullet_match.group(1)
+        else:
+            paragraph_lines.append(line)
+
+    yield from flush_paragraph()
+
+
+def build_document_pdf_bytes(title: str, content: str, status: str) -> bytes:
+    """Build a readable, wrapped PDF for a generated document."""
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.lib.units import mm
+        from reportlab.platypus import (
+            HRFlowable,
+            Paragraph,
+            SimpleDocTemplate,
+            Spacer,
+            Table,
+            TableStyle,
+        )
+    except ImportError:
+        raise HTTPException(status_code=500, detail="reportlab not installed. Run: pip install reportlab")
+
+    buffer = BytesIO()
+    page_width, _page_height = A4
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=18 * mm,
+        rightMargin=18 * mm,
+        topMargin=18 * mm,
+        bottomMargin=22 * mm,
+        title=clean_pdf_text(title or "Untitled Document"),
+        author="InkGraph",
+    )
+
+    ink = colors.HexColor("#2B2622")
+    paper = colors.HexColor("#EDE6D6")
+    brass = colors.HexColor("#8C7A4B")
+    ribbon = colors.HexColor("#A63D34")
+    muted = colors.HexColor("#8B8478")
+    dark = colors.HexColor("#2B2622")
+
+    styles = {
+        "header_brand": ParagraphStyle(
+            "InkGraphHeaderBrand",
+            fontName="Helvetica-Bold",
+            fontSize=17,
+            leading=19,
+            textColor=paper,
+        ),
+        "header_meta": ParagraphStyle(
+            "InkGraphHeaderMeta",
+            fontName="Helvetica",
+            fontSize=8,
+            leading=10,
+            textColor=paper,
+        ),
+        "status": ParagraphStyle(
+            "InkGraphStatus",
+            fontName="Helvetica-Bold",
+            fontSize=8,
+            leading=10,
+            alignment=TA_RIGHT,
+            textColor=paper,
+        ),
+        "title": ParagraphStyle(
+            "InkGraphTitle",
+            fontName="Helvetica-Bold",
+            fontSize=20,
+            leading=25,
+            alignment=TA_CENTER,
+            textColor=ink,
+            spaceAfter=8,
+            splitLongWords=1,
+            wordWrap="LTR",
+        ),
+        "h1": ParagraphStyle(
+            "InkGraphHeading1",
+            fontName="Helvetica-Bold",
+            fontSize=15,
+            leading=19,
+            textColor=ribbon,
+            spaceBefore=8,
+            spaceAfter=5,
+            splitLongWords=1,
+            wordWrap="LTR",
+        ),
+        "h2": ParagraphStyle(
+            "InkGraphHeading2",
+            fontName="Helvetica-Bold",
+            fontSize=13,
+            leading=17,
+            textColor=brass,
+            spaceBefore=7,
+            spaceAfter=4,
+            splitLongWords=1,
+            wordWrap="LTR",
+        ),
+        "h3": ParagraphStyle(
+            "InkGraphHeading3",
+            fontName="Helvetica-BoldOblique",
+            fontSize=11,
+            leading=15,
+            textColor=ink,
+            spaceBefore=6,
+            spaceAfter=3,
+            splitLongWords=1,
+            wordWrap="LTR",
+        ),
+        "paragraph": ParagraphStyle(
+            "InkGraphParagraph",
+            fontName="Helvetica",
+            fontSize=10.5,
+            leading=15.5,
+            textColor=ink,
+            spaceAfter=7,
+            splitLongWords=1,
+            wordWrap="LTR",
+        ),
+        "bullet": ParagraphStyle(
+            "InkGraphBullet",
+            fontName="Helvetica",
+            fontSize=10.5,
+            leading=15,
+            textColor=ink,
+            leftIndent=14,
+            firstLineIndent=0,
+            bulletIndent=4,
+            spaceAfter=5,
+            splitLongWords=1,
+            wordWrap="LTR",
+        ),
+    }
+
+    header = Table(
+        [
+            [
+                Paragraph("INKGRAPH", styles["header_brand"]),
+                Paragraph(f"STATUS: {_pdf_inline_text(status or 'UNKNOWN')}", styles["status"]),
+            ],
+            [
+                Paragraph("Multi-Agent Writing System | AI-Generated Document", styles["header_meta"]),
+                "",
+            ],
+        ],
+        colWidths=[122 * mm, 52 * mm],
+    )
+    header.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), dark),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 9),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 9),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+            ]
+        )
+    )
+
+    story = [
+        header,
+        Spacer(1, 11 * mm),
+        Paragraph(_pdf_inline_text(title or "Untitled Document"), styles["title"]),
+        HRFlowable(width="100%", thickness=1.1, color=brass, spaceBefore=2, spaceAfter=10),
+    ]
+
+    blocks = list(_pdf_content_blocks(content))
+    if not blocks:
+        blocks = [("paragraph", "No document content is available yet.")]
+
+    for block_type, text in blocks:
+        safe_text = _pdf_inline_text(text)
+        if not safe_text:
+            continue
+        if block_type == "bullet":
+            story.append(Paragraph(safe_text, styles["bullet"], bulletText="-"))
+        else:
+            story.append(Paragraph(safe_text, styles.get(block_type, styles["paragraph"])))
+
+    def draw_footer(canvas, current_doc):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(muted)
+        canvas.drawCentredString(
+            page_width / 2,
+            11 * mm,
+            f"Generated by InkGraph | inkgraph-frontend.vercel.app | Page {current_doc.page}",
+        )
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=draw_footer, onLaterPages=draw_footer)
+    return buffer.getvalue()
+
+
 @app.get("/documents/{document_id}/export/pdf")
 async def export_pdf(
     document_id: UUID,
@@ -417,13 +655,8 @@ async def export_pdf(
 ):
     """
     Generate and stream a PDF of the document's current content.
-    Uses fpdf2 for server-side PDF generation.
+    Uses ReportLab for server-side PDF generation.
     """
-    try:
-        from fpdf import FPDF
-    except ImportError:
-        raise HTTPException(status_code=500, detail="fpdf2 not installed. Run: pip install fpdf2")
-
     result = (
         get_supabase()
         .table("documents")
@@ -439,91 +672,9 @@ async def export_pdf(
     content = doc.get("current_content") or ""
     status = doc.get("status", "unknown").upper()
 
-    # ── Build PDF
-    pdf = FPDF(orientation="P", unit="mm", format="A4")
-    pdf.set_auto_page_break(auto=True, margin=20)
-    pdf.add_page()
-
-    # Header band
-    pdf.set_fill_color(43, 38, 34)       
-    pdf.rect(0, 0, 210, 28, "F")
-    pdf.set_text_color(237, 230, 214)    
-    pdf.set_font("Helvetica", "B", 18)
-    pdf.set_xy(10, 7)
-    pdf.cell(0, 10, clean_pdf_text("INKGRAPH"))
-    pdf.set_font("Helvetica", "", 8)
-    pdf.set_xy(10, 19)
-    pdf.cell(0, 5, clean_pdf_text("Multi-Agent Writing System  |  AI-Generated Document"))
-
-    # Status badge
-    pdf.set_xy(150, 10)
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_text_color(92, 107, 71)      # --olive
-    pdf.cell(50, 8, clean_pdf_text(f"STATUS: {status}"), align="R")
-
-    # Title
-    pdf.set_text_color(43, 38, 34)
-    pdf.set_font("Helvetica", "B", 20)
-    pdf.set_xy(10, 36)
-    pdf.multi_cell(190, 10, clean_pdf_text(title), align="C")
-    pdf.ln(4)
-
-    # Divider
-    pdf.set_draw_color(140, 122, 75)     # --brass
-    pdf.set_line_width(0.8)
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-    pdf.ln(6)
-
-    # Content — parse markdown-ish headings
-    pdf.set_text_color(43, 38, 34)
-    heading1 = re.compile(r"^#\s+(.+)$")
-    heading2 = re.compile(r"^##\s+(.+)$")
-    heading3 = re.compile(r"^###\s+(.+)$")
-    bold_inline = re.compile(r"\*\*(.+?)\*\*")
-
-    for raw_line in content.split("\n"):
-        line = raw_line.rstrip()
-
-        if not line:
-            pdf.ln(3)
-            continue
-
-        m1 = heading1.match(line)
-        m2 = heading2.match(line)
-        m3 = heading3.match(line)
-
-        if m1:
-            pdf.set_font("Helvetica", "B", 15)
-            pdf.set_text_color(166, 61, 52)   # --ribbon
-            pdf.multi_cell(190, 8, clean_pdf_text(m1.group(1)))
-            pdf.set_text_color(43, 38, 34)
-        elif m2:
-            pdf.set_font("Helvetica", "B", 13)
-            pdf.set_text_color(140, 122, 75)  # --brass
-            pdf.multi_cell(190, 7, clean_pdf_text(m2.group(1)))
-            pdf.set_text_color(43, 38, 34)
-        elif m3:
-            pdf.set_font("Helvetica", "BI", 11)
-            pdf.multi_cell(190, 6, clean_pdf_text(m3.group(1)))
-        elif line.startswith("- ") or line.startswith("* "):
-            pdf.set_font("Helvetica", "", 10)
-            pdf.set_x(15)
-            pdf.multi_cell(185, 5.5, clean_pdf_text(f"- {line[2:]}"))
-        else:
-            # Strip bold markers for plain PDF rendering
-            clean = bold_inline.sub(r"\1", line)
-            pdf.set_font("Helvetica", "", 10)
-            pdf.multi_cell(190, 5.5, clean_pdf_text(clean))
-
-    # Footer
-    pdf.set_y(-18)
-    pdf.set_font("Helvetica", "", 8)
-    pdf.set_text_color(139, 132, 120)
-    pdf.cell(0, 5, clean_pdf_text(f"Generated by InkGraph  |  inkgraph.vercel.app  |  Page {pdf.page_no()}"), align="C")
-
-    pdf_bytes = bytes(pdf.output())
+    pdf_bytes = build_document_pdf_bytes(title, content, status)
     safe_name = re.sub(r"[^\w\s-]", "", title).strip().replace(" ", "_").lower()
-    filename = f"inkgraph_{safe_name}.pdf"
+    filename = f"inkgraph_{safe_name or 'document'}.pdf"
 
     return StreamingResponse(
         BytesIO(pdf_bytes),
