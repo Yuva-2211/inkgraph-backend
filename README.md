@@ -16,6 +16,11 @@ The API runs at `http://localhost:8000`.
 
 Connect this repository to Render as a Blueprint or Web Service. The included `render.yaml` builds from the repository root.
 
+If you create a manual Web Service instead of using the Blueprint, set:
+
+- Build Command: `pip install -r requirements.txt`
+- Start Command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+
 Set these secret environment variables in Render:
 
 - `GROQ_API_KEY`
